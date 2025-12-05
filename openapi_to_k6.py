@@ -149,6 +149,7 @@ class OpenAPIToK6:
             "import http from 'k6/http';",
             "import { check, sleep } from 'k6';",
             "import { Rate } from 'k6/metrics';",
+            "import { randomString, randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';",
             "",
             "// Error rate metric",
             "const errorRate = new Rate('errors');",
@@ -213,7 +214,9 @@ class OpenAPIToK6:
                     # Generate a minimal request body based on schema
                     body_var_name = f"body{i}"
                     request_body_code = self.generate_request_body(request_body_schema, body_var_name)
-                    request_body_var = body_var_name
+                    # Only set request_body_var if we actually generated body code
+                    if request_body_code:
+                        request_body_var = body_var_name
             
             # Generate value tracker
             res_var = f"res{i}"
@@ -272,13 +275,30 @@ class OpenAPIToK6:
             elif prop_type == 'string':
                 # Use tracked values if available
                 if 'id' in prop_name.lower() or 'franchise' in prop_name.lower():
-                    body_parts.append(f"        {prop_name}: trackedValues.{prop_name} || trackedValues.franchiseId || '{prop_name}_value'")
+                    body_parts.append(f"        {prop_name}: trackedValues.{prop_name} || trackedValues.franchiseId || randomString(10)")
                 else:
-                    body_parts.append(f"        {prop_name}: '{prop_name}_value'")
+                    # Generate random string based on field name hints
+                    if 'email' in prop_name.lower():
+                        body_parts.append(f"        {prop_name}: `${{randomString(8)}}@example.com`")
+                    elif 'url' in prop_name.lower() or 'uri' in prop_name.lower():
+                        body_parts.append(f"        {prop_name}: `https://example.com/${{randomString(10)}}`")
+                    elif 'phone' in prop_name.lower():
+                        body_parts.append(f"        {prop_name}: `+1${{randomIntBetween(2000000000, 9999999999)}}`")
+                    elif 'date' in prop_name.lower() or 'time' in prop_name.lower():
+                        body_parts.append(f"        {prop_name}: new Date().toISOString()")
+                    else:
+                        body_parts.append(f"        {prop_name}: randomString(10)")
             elif prop_type == 'integer' or prop_type == 'number':
-                body_parts.append(f"        {prop_name}: {prop_schema.get('default', 0)}")
+                # Generate random number within reasonable range
+                minimum = prop_schema.get('minimum', 0)
+                maximum = prop_schema.get('maximum', 1000)
+                if prop_type == 'integer':
+                    body_parts.append(f"        {prop_name}: randomIntBetween({minimum}, {maximum})")
+                else:
+                    # For float, use a simple random
+                    body_parts.append(f"        {prop_name}: Math.random() * ({maximum} - {minimum}) + {minimum}")
             elif prop_type == 'boolean':
-                body_parts.append(f"        {prop_name}: {prop_schema.get('default', False)}")
+                body_parts.append(f"        {prop_name}: Math.random() > 0.5")
             elif prop_type == 'array':
                 body_parts.append(f"        {prop_name}: []")
             elif prop_type == 'object':
